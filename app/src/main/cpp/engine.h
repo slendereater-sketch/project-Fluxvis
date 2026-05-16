@@ -40,6 +40,7 @@ private:
     // Graphics state
     GLuint mFBO[2];
     GLuint mTextures[2];
+    GLuint mVAO;
     GLuint mQuadVBO;
     GLuint mProgram;
     GLuint mBlitProgram;
