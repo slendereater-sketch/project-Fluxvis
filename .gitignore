@@ -1,0 +1,17 @@
+*.iml
+.gradle
+/local.properties
+/.idea/caches/lastIndex
+/.idea/workspace.xml
+/.idea/libraries
+/.idea/modules.xml
+/.idea/deploymentTargetDropDown.xml
+/.idea/assetWizardSettings.xml
+/build
+/app/build
+/app/src/main/cpp/build
+.cxx
+.externalNativeBuild
+*.keystore
+!debug.keystore
+capture.png
