@@ -7,6 +7,8 @@ import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
 import android.opengl.GLSurfaceView
 import android.os.Bundle
+import android.view.GestureDetector
+import android.view.MotionEvent
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
@@ -15,6 +17,8 @@ import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 
 class MainActivity : ComponentActivity() {
+
+    private lateinit var gestureDetector: GestureDetector
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -38,12 +42,19 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
+        // Setup gesture detector for preset switching
+        gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                NativeInterface.nextPreset()
+                return true
+            }
+        })
+
         val glView = GLSurfaceView(this).apply {
             setEGLContextClientVersion(3)
             setRenderer(object : GLSurfaceView.Renderer {
                 override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
-                    NativeInterface.init(null as android.view.Surface?) // Pass null as we handle EGL in GLSurfaceView now
-                    // Note: We'll update the native init to be compatible
+                    NativeInterface.init(null)
                 }
                 override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
                     NativeInterface.onResize(width, height)
@@ -53,6 +64,16 @@ class MainActivity : ComponentActivity() {
                 }
             })
             renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
+            
+            // Handle touch events for warping
+            setOnTouchListener { v, event ->
+                gestureDetector.onTouchEvent(event)
+                // Send normalized touch coordinates for warping
+                val normX = event.x / v.width
+                val normY = event.y / v.height
+                NativeInterface.updateTouch(normX, normY)
+                true
+            }
         }
 
         setContentView(glView)

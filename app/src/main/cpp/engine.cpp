@@ -21,6 +21,7 @@ Engine::Engine() {
 }
 
 Engine::~Engine() {
+    TerminateGLES();
 }
 
 void Engine::SetSurface(ANativeWindow* window) {
@@ -51,6 +52,10 @@ void Engine::InitGLES() {
         uniform vec2 u_resolution;
         uniform float u_time;
         uniform float u_bass;
+        uniform float u_mid;
+        uniform float u_high;
+        uniform vec2 u_touch;
+        uniform int u_preset;
 
         mat2 rot(float a) { 
             float s = sin(a); float c = cos(a);
@@ -63,30 +68,58 @@ void Engine::InitGLES() {
             return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
         }
 
-        void main() {
-            vec2 uv = v_uv - 0.5;
+        // --- PRESET 0: DEEP MANDALA ---
+        vec3 mandala(vec2 uv, float time, float bass, float mid, float high, vec2 touch) {
             uv.x *= u_resolution.x / u_resolution.y;
-            
-            float segments = 8.0; 
+            float segments = 3.0 + floor(touch.x * 12.0);
             float r = length(uv);
             float a = atan(uv.y, uv.x);
             float ma = mod(a, 2.0 * 3.14159 / segments);
             vec2 p = vec2(cos(ma), sin(ma)) * r;
-            
             float d = 1e10;
-            float bass = clamp(u_bass, 0.0, 1.0);
-            
-            for(int i = 0; i < 5; i++) {
-                p = abs(p) - (0.15 + bass * 0.1);
-                p *= rot(u_time * 0.2 + float(i));
-                p *= 1.2;
-                d = min(d, length(p) - 0.02);
+            for(int i = 0; i < 6; i++) {
+                p = abs(p) - (0.2 + bass * 0.15);
+                p *= rot(time * 0.1 + touch.y * 5.0 + mid * 0.3);
+                p *= 1.1 + high * 0.05;
+                d = min(d, length(p) - 0.05);
             }
-            
-            float glow = 0.004 / (0.004 + d);
-            vec3 col = hsv2rgb(vec3(r * 0.3 + u_time * 0.1, 0.8, 1.0));
-            col *= glow * (2.0 + bass * 20.0);
-            
+            float glow = 0.005 / (0.005 + d);
+            return hsv2rgb(vec3(r * 0.5 + time * 0.05, 0.7, 1.0)) * glow * (1.5 + bass * 10.0);
+        }
+
+        // --- PRESET 1: NEON FRACTAL ---
+        vec3 fractal(vec2 uv, float time, float bass, float mid, float high, vec2 touch) {
+            vec2 p = (uv - 0.5) * 2.0;
+            p.x *= u_resolution.x / u_resolution.y;
+            p *= 0.5 + touch.x;
+            float d = 1e10;
+            for(int i=0; i<8; i++) {
+                p = abs(p) / dot(p,p) - (0.5 + mid * 0.2);
+                p *= rot(time * 0.2 + touch.y);
+                d = min(d, length(p.x) * length(p.y));
+            }
+            return vec3(0.1, 0.4, 1.0) / (d * 20.0 + 0.1) * (1.0 + mid * 5.0);
+        }
+
+        // --- PRESET 2: LIQUID PLASMA ---
+        vec3 plasma(vec2 uv, float time, float bass, float mid, float high, vec2 touch) {
+            vec2 p = uv * (2.0 + touch.x * 5.0);
+            float v = 0.0;
+            v += sin(p.x + time);
+            v += sin((p.y + time) / 2.0);
+            v += sin((p.x + p.y + time) / 2.0);
+            p += vec2(sin(time * 0.3), cos(time * 0.5)) * touch.y;
+            v += sin(sqrt(p.x*p.x + p.y*p.y + 1.0) + time);
+            v = v / 2.0;
+            vec3 col = vec3(sin(v * 3.14159), sin(v * 3.14159 + 2.0), sin(v * 3.14159 + 4.0));
+            return col * (0.8 + high * 2.0);
+        }
+
+        void main() {
+            vec3 col = vec3(0.0);
+            if(u_preset == 0) col = mandala(v_uv - 0.5, u_time, u_bass, u_mid, u_high, u_touch);
+            else if(u_preset == 1) col = fractal(v_uv, u_time, u_bass, u_mid, u_high, u_touch);
+            else col = plasma(v_uv, u_time, u_bass, u_mid, u_high, u_touch);
             fragColor = vec4(col, 1.0);
         })";
 
@@ -110,7 +143,7 @@ void Engine::SetupQuad() {
 void Engine::Render() {
     if (!mProgram) return;
 
-    glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 
     auto audio = mAudio.GetLatestFeatures();
@@ -122,57 +155,58 @@ void Engine::Render() {
     glUniform2f(mResLoc, (float)mWidth, (float)mHeight);
     glUniform1f(mTimeLoc, currentTime);
     glUniform1f(glGetUniformLocation(mProgram, "u_bass"), audio.bass);
+    glUniform1f(glGetUniformLocation(mProgram, "u_mid"), audio.mid);
+    glUniform1f(glGetUniformLocation(mProgram, "u_high"), audio.treble);
+    glUniform2f(glGetUniformLocation(mProgram, "u_touch"), mTouchX, mTouchY);
+    glUniform1i(glGetUniformLocation(mProgram, "u_preset"), mPreset);
     
     glBindVertexArray(mVAO);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     glBindVertexArray(0);
 }
 
+void Engine::NextPreset() {
+    mPreset = (mPreset + 1) % 3;
+    __android_log_print(ANDROID_LOG_INFO, TAG, "Switched to Preset: %d", mPreset);
+}
+
+void Engine::UpdateTouch(float x, float y) {
+    mTouchX = x;
+    mTouchY = y;
+}
+
 void Engine::TerminateGLES() {}
-
-GLuint Engine::CompileShader(GLenum type, const char* source) {
-    GLuint shader = glCreateShader(type);
-    glShaderSource(shader, 1, &source, nullptr);
-    glCompileShader(shader);
-    return shader;
+GLuint Engine::CompileShader(GLenum type, const char* src) {
+    GLuint s = glCreateShader(type); glShaderSource(s, 1, &src, nullptr); glCompileShader(s); return s;
 }
-
-GLuint Engine::LinkProgram(GLuint vert, GLuint frag) {
-    GLuint prog = glCreateProgram();
-    glAttachShader(prog, vert); glAttachShader(prog, frag);
-    glLinkProgram(prog);
-    return prog;
+GLuint Engine::LinkProgram(GLuint v, GLuint f) {
+    GLuint p = glCreateProgram(); glAttachShader(p, v); glAttachShader(p, f); glLinkProgram(p); return p;
 }
-
-void Engine::UpdateControls(float z, float w, float d) {
-    (void)z; (void)w; (void)d;
-}
-
-void Engine::PushAudioData(const float* data, int length) {
-    mAudio.PushData(data, length);
-}
+void Engine::UpdateControls(float z, float w, float d) { (void)z; (void)w; (void)d; }
+void Engine::PushAudioData(const float* data, int len) { mAudio.PushData(data, len); }
 
 extern "C" {
     JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_init(JNIEnv* env, jobject obj, jobject surface) {
-        (void)env; (void)obj; (void)surface;
-        Engine::GetInstance()->InitGLES();
+        (void)env; (void)obj; (void)surface; Engine::GetInstance()->InitGLES();
     }
     JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_onResize(JNIEnv* env, jobject obj, jint w, jint h) {
-        (void)env; (void)obj;
-        Engine::GetInstance()->OnResize(w, h);
+        (void)env; (void)obj; Engine::GetInstance()->OnResize(w, h);
     }
     JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_renderFrame(JNIEnv* env, jobject obj) {
-        (void)env; (void)obj;
-        Engine::GetInstance()->Render();
+        (void)env; (void)obj; Engine::GetInstance()->Render();
     }
-    JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_updateControls(JNIEnv* env, jobject obj, jfloat z, jfloat w, jfloat d) {
-        (void)env; (void)obj;
-        Engine::GetInstance()->UpdateControls(z, w, d);
+    JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_nextPreset(JNIEnv* env, jobject obj) {
+        (void)env; (void)obj; Engine::GetInstance()->NextPreset();
+    }
+    JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_updateTouch(JNIEnv* env, jobject obj, jfloat x, jfloat y) {
+        (void)env; (void)obj; Engine::GetInstance()->UpdateTouch(x, y);
     }
     JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_pushAudioData(JNIEnv* env, jobject obj, jfloatArray data) {
-        jfloat* buffer = env->GetFloatArrayElements(data, nullptr);
-        jsize length = env->GetArrayLength(data);
-        Engine::GetInstance()->PushAudioData(buffer, (int)length);
-        env->ReleaseFloatArrayElements(data, buffer, JNI_ABORT);
+        jfloat* b = env->GetFloatArrayElements(data, nullptr);
+        Engine::GetInstance()->PushAudioData(b, (int)env->GetArrayLength(data));
+        env->ReleaseFloatArrayElements(data, b, JNI_ABORT);
+    }
+    JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_updateControls(JNIEnv* env, jobject obj, jfloat z, jfloat w, jfloat d) {
+        (void)env; (void)obj; Engine::GetInstance()->UpdateControls(z, w, d);
     }
 }
