@@ -1,34 +1,31 @@
 package com.visualizer.engine
 
 import android.Manifest
-import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
+import android.opengl.GLSurfaceView
 import android.os.Bundle
-import android.view.SurfaceHolder
-import android.view.SurfaceView
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import javax.microedition.khronos.egl.EGLConfig
+import javax.microedition.khronos.opengles.GL10
 
 class MainActivity : ComponentActivity() {
-    private var isRendering = false
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted: Boolean ->
-        if (isGranted) {
-            startMediaProjectionRequest()
-        }
+        if (isGranted) startMediaProjectionRequest()
     }
 
     private val projectionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
+        if (result.resultCode == RESULT_OK) {
             val serviceIntent = Intent(this, AudioCaptureService::class.java).apply {
                 putExtra("RESULT_CODE", result.resultCode)
                 putExtra("DATA", result.data)
@@ -39,30 +36,26 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
-        // Keep screen on
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        
-        setContentView(R.layout.activity_main)
-        
-        val surfaceView = findViewById<SurfaceView>(R.id.surface_view)
-        surfaceView.holder.addCallback(object : SurfaceHolder.Callback {
-            override fun surfaceCreated(holder: SurfaceHolder) {
-                NativeInterface.init(holder.surface)
-                isRendering = true
-                Thread {
-                    while (isRendering) {
-                        NativeInterface.renderFrame()
-                        Thread.sleep(16)
-                    }
-                }.start()
-            }
-            override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}
-            override fun surfaceDestroyed(holder: SurfaceHolder) {
-                isRendering = false
-            }
-        })
 
+        val glView = GLSurfaceView(this).apply {
+            setEGLContextClientVersion(3)
+            setRenderer(object : GLSurfaceView.Renderer {
+                override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
+                    NativeInterface.init(null as android.view.Surface?) // Pass null as we handle EGL in GLSurfaceView now
+                    // Note: We'll update the native init to be compatible
+                }
+                override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
+                    NativeInterface.onResize(width, height)
+                }
+                override fun onDrawFrame(gl: GL10?) {
+                    NativeInterface.renderFrame()
+                }
+            })
+            renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
+        }
+
+        setContentView(glView)
         checkPermissions()
     }
 
@@ -81,7 +74,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        isRendering = false
         stopService(Intent(this, AudioCaptureService::class.java))
     }
 }

@@ -21,39 +21,19 @@ Engine::Engine() {
 }
 
 Engine::~Engine() {
-    TerminateGLES();
 }
 
 void Engine::SetSurface(ANativeWindow* window) {
-    mWindow = window;
+    (void)window;
+}
+
+void Engine::OnResize(int width, int height) {
+    mWidth = width;
+    mHeight = height;
+    glViewport(0, 0, width, height);
 }
 
 void Engine::InitGLES() {
-    mDisplay = eglGetDisplay(EGL_DEFAULT_DISPLAY);
-    eglInitialize(mDisplay, nullptr, nullptr);
-
-    const EGLint configAttribs[] = {
-        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
-        EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
-        EGL_BLUE_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_RED_SIZE, 8, EGL_ALPHA_SIZE, 8,
-        EGL_NONE
-    };
-    EGLConfig config;
-    EGLint numConfigs;
-    eglChooseConfig(mDisplay, configAttribs, &config, 1, &numConfigs);
-
-    const EGLint contextAttribs[] = { EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE };
-    mContext = eglCreateContext(mDisplay, config, EGL_NO_CONTEXT, contextAttribs);
-    mSurface = eglCreateWindowSurface(mDisplay, config, mWindow, nullptr);
-
-    if (!eglMakeCurrent(mDisplay, mSurface, mSurface, mContext)) {
-        __android_log_print(ANDROID_LOG_ERROR, TAG, "eglMakeCurrent failed");
-        return;
-    }
-
-    mWidth = ANativeWindow_getWidth(mWindow);
-    mHeight = ANativeWindow_getHeight(mWindow);
-    
     SetupQuad();
 
     const char* vSrc = R"(#version 300 es
@@ -113,8 +93,6 @@ void Engine::InitGLES() {
     mProgram = LinkProgram(CompileShader(GL_VERTEX_SHADER, vSrc), CompileShader(GL_FRAGMENT_SHADER, fSrc));
     mResLoc = glGetUniformLocation(mProgram, "u_resolution");
     mTimeLoc = glGetUniformLocation(mProgram, "u_time");
-    
-    __android_log_print(ANDROID_LOG_INFO, TAG, "Engine Ready: %dx%d", mWidth, mHeight);
 }
 
 void Engine::SetupQuad() {
@@ -130,23 +108,16 @@ void Engine::SetupQuad() {
 }
 
 void Engine::Render() {
-    if (mDisplay == EGL_NO_DISPLAY || mSurface == EGL_NO_SURFACE) return;
+    if (!mProgram) return;
 
-    // CLEAR TO RED (If you see RED, the engine is looping but shader failed)
-    glClearColor(1.0f, 0.0f, 0.0f, 1.0f);
+    glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
-
-    if (!mProgram) {
-        eglSwapBuffers(mDisplay, mSurface);
-        return;
-    }
 
     auto audio = mAudio.GetLatestFeatures();
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     float currentTime = (float)ts.tv_sec + (float)ts.tv_nsec / 1e9f - mStartTime;
 
-    glViewport(0, 0, mWidth, mHeight);
     glUseProgram(mProgram);
     glUniform2f(mResLoc, (float)mWidth, (float)mHeight);
     glUniform1f(mTimeLoc, currentTime);
@@ -155,63 +126,47 @@ void Engine::Render() {
     glBindVertexArray(mVAO);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     glBindVertexArray(0);
-
-    eglSwapBuffers(mDisplay, mSurface);
 }
 
-void Engine::UpdateControls(float zoom, float warp, float dampening) {
-    std::lock_guard<std::mutex> lock(mControlMutex);
-    mUserControls[0] = zoom; mUserControls[1] = warp; mUserControls[2] = dampening;
-}
-
-void Engine::PushAudioData(const float* data, int length) {
-    mAudio.PushData(data, length);
-}
-
-void Engine::TerminateGLES() {
-    if (mDisplay != EGL_NO_DISPLAY) {
-        eglMakeCurrent(mDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-        if (mContext != EGL_NO_CONTEXT) eglDestroyContext(mDisplay, mContext);
-        if (mSurface != EGL_NO_SURFACE) eglDestroySurface(mDisplay, mSurface);
-        eglTerminate(mDisplay);
-    }
-}
+void Engine::TerminateGLES() {}
 
 GLuint Engine::CompileShader(GLenum type, const char* source) {
     GLuint shader = glCreateShader(type);
     glShaderSource(shader, 1, &source, nullptr);
     glCompileShader(shader);
-    GLint compiled;
-    glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
-    if (!compiled) {
-        char log[512]; glGetShaderInfoLog(shader, 512, nullptr, log);
-        __android_log_print(ANDROID_LOG_ERROR, TAG, "Shader Error: %s", log);
-        return 0;
-    }
     return shader;
 }
 
 GLuint Engine::LinkProgram(GLuint vert, GLuint frag) {
-    if (!vert || !frag) return 0;
     GLuint prog = glCreateProgram();
     glAttachShader(prog, vert); glAttachShader(prog, frag);
     glLinkProgram(prog);
     return prog;
 }
 
-void Engine::CreateFBOs(int w, int h) { (void)w; (void)h; }
-void Engine::SetupUBO() {}
+void Engine::UpdateControls(float z, float w, float d) {
+    (void)z; (void)w; (void)d;
+}
+
+void Engine::PushAudioData(const float* data, int length) {
+    mAudio.PushData(data, length);
+}
 
 extern "C" {
     JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_init(JNIEnv* env, jobject obj, jobject surface) {
-        ANativeWindow* window = ANativeWindow_fromSurface(env, surface);
-        Engine::GetInstance()->SetSurface(window);
+        (void)env; (void)obj; (void)surface;
         Engine::GetInstance()->InitGLES();
     }
+    JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_onResize(JNIEnv* env, jobject obj, jint w, jint h) {
+        (void)env; (void)obj;
+        Engine::GetInstance()->OnResize(w, h);
+    }
     JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_renderFrame(JNIEnv* env, jobject obj) {
+        (void)env; (void)obj;
         Engine::GetInstance()->Render();
     }
     JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_updateControls(JNIEnv* env, jobject obj, jfloat z, jfloat w, jfloat d) {
+        (void)env; (void)obj;
         Engine::GetInstance()->UpdateControls(z, w, d);
     }
     JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_pushAudioData(JNIEnv* env, jobject obj, jfloatArray data) {
