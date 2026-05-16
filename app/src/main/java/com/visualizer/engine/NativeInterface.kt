@@ -12,6 +12,5 @@ object NativeInterface {
     external fun renderFrame()
     external fun updateControls(zoom: Float, warp: Float, dampening: Float)
     external fun pushAudioData(data: FloatArray)
-    external fun nextPreset()
     external fun updateTouch(x: Float, y: Float)
 }

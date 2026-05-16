@@ -21,7 +21,6 @@ Engine::Engine() {
 }
 
 Engine::~Engine() {
-    TerminateGLES();
 }
 
 void Engine::SetSurface(ANativeWindow* window) {
@@ -55,71 +54,42 @@ void Engine::InitGLES() {
         uniform float u_mid;
         uniform float u_high;
         uniform vec2 u_touch;
-        uniform int u_preset;
 
         mat2 rot(float a) { 
             float s = sin(a); float c = cos(a);
             return mat2(c, -s, s, c);
         }
 
-        vec3 hsv2rgb(vec3 c) {
-            vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
-            vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
-            return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
-        }
-
-        // --- PRESET 0: DEEP MANDALA ---
-        vec3 mandala(vec2 uv, float time, float bass, float mid, float high, vec2 touch) {
-            uv.x *= u_resolution.x / u_resolution.y;
-            float segments = 3.0 + floor(touch.x * 12.0);
-            float r = length(uv);
-            float a = atan(uv.y, uv.x);
-            float ma = mod(a, 2.0 * 3.14159 / segments);
-            vec2 p = vec2(cos(ma), sin(ma)) * r;
-            float d = 1e10;
-            for(int i = 0; i < 6; i++) {
-                p = abs(p) - (0.2 + bass * 0.15);
-                p *= rot(time * 0.1 + touch.y * 5.0 + mid * 0.3);
-                p *= 1.1 + high * 0.05;
-                d = min(d, length(p) - 0.05);
-            }
-            float glow = 0.005 / (0.005 + d);
-            return hsv2rgb(vec3(r * 0.5 + time * 0.05, 0.7, 1.0)) * glow * (1.5 + bass * 10.0);
-        }
-
-        // --- PRESET 1: NEON FRACTAL ---
+        // --- PURE BLUE NEON FRACTAL ---
         vec3 fractal(vec2 uv, float time, float bass, float mid, float high, vec2 touch) {
             vec2 p = (uv - 0.5) * 2.0;
             p.x *= u_resolution.x / u_resolution.y;
-            p *= 0.5 + touch.x;
+            
+            // Warp center and scale based on touch
+            p *= 0.5 + touch.x * 2.0;
+            
             float d = 1e10;
             for(int i=0; i<8; i++) {
+                // Iterative folding
                 p = abs(p) / dot(p,p) - (0.5 + mid * 0.2);
-                p *= rot(time * 0.2 + touch.y);
+                // Twisting based on time and touch vertical
+                p *= rot(time * 0.2 + touch.y * 5.0);
+                // Geometric distance estimation
                 d = min(d, length(p.x) * length(p.y));
             }
-            return vec3(0.1, 0.4, 1.0) / (d * 20.0 + 0.1) * (1.0 + mid * 5.0);
-        }
-
-        // --- PRESET 2: LIQUID PLASMA ---
-        vec3 plasma(vec2 uv, float time, float bass, float mid, float high, vec2 touch) {
-            vec2 p = uv * (2.0 + touch.x * 5.0);
-            float v = 0.0;
-            v += sin(p.x + time);
-            v += sin((p.y + time) / 2.0);
-            v += sin((p.x + p.y + time) / 2.0);
-            p += vec2(sin(time * 0.3), cos(time * 0.5)) * touch.y;
-            v += sin(sqrt(p.x*p.x + p.y*p.y + 1.0) + time);
-            v = v / 2.0;
-            vec3 col = vec3(sin(v * 3.14159), sin(v * 3.14159 + 2.0), sin(v * 3.14159 + 4.0));
-            return col * (0.8 + high * 2.0);
+            
+            // Neon blue glow logic
+            vec3 neonColor = vec3(0.1, 0.5, 1.0);
+            float intensity = 1.0 / (d * 15.0 + 0.08);
+            
+            // Audio-reactive pulsing
+            intensity *= (1.2 + bass * 8.0);
+            
+            return neonColor * intensity;
         }
 
         void main() {
-            vec3 col = vec3(0.0);
-            if(u_preset == 0) col = mandala(v_uv - 0.5, u_time, u_bass, u_mid, u_high, u_touch);
-            else if(u_preset == 1) col = fractal(v_uv, u_time, u_bass, u_mid, u_high, u_touch);
-            else col = plasma(v_uv, u_time, u_bass, u_mid, u_high, u_touch);
+            vec3 col = fractal(v_uv, u_time, u_bass, u_mid, u_high, u_touch);
             fragColor = vec4(col, 1.0);
         })";
 
@@ -158,16 +128,10 @@ void Engine::Render() {
     glUniform1f(glGetUniformLocation(mProgram, "u_mid"), audio.mid);
     glUniform1f(glGetUniformLocation(mProgram, "u_high"), audio.treble);
     glUniform2f(glGetUniformLocation(mProgram, "u_touch"), mTouchX, mTouchY);
-    glUniform1i(glGetUniformLocation(mProgram, "u_preset"), mPreset);
     
     glBindVertexArray(mVAO);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     glBindVertexArray(0);
-}
-
-void Engine::NextPreset() {
-    mPreset = (mPreset + 1) % 3;
-    __android_log_print(ANDROID_LOG_INFO, TAG, "Switched to Preset: %d", mPreset);
 }
 
 void Engine::UpdateTouch(float x, float y) {
@@ -194,9 +158,6 @@ extern "C" {
     }
     JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_renderFrame(JNIEnv* env, jobject obj) {
         (void)env; (void)obj; Engine::GetInstance()->Render();
-    }
-    JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_nextPreset(JNIEnv* env, jobject obj) {
-        (void)env; (void)obj; Engine::GetInstance()->NextPreset();
     }
     JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_updateTouch(JNIEnv* env, jobject obj, jfloat x, jfloat y) {
         (void)env; (void)obj; Engine::GetInstance()->UpdateTouch(x, y);

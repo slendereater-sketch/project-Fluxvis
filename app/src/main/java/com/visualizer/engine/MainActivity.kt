@@ -42,14 +42,6 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        // Setup gesture detector for preset switching
-        gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
-            override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-                NativeInterface.nextPreset()
-                return true
-            }
-        })
-
         val glView = GLSurfaceView(this).apply {
             setEGLContextClientVersion(3)
             setRenderer(object : GLSurfaceView.Renderer {
@@ -65,10 +57,8 @@ class MainActivity : ComponentActivity() {
             })
             renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
             
-            // Handle touch events for warping
+            // Handle touch events for warping ONLY
             setOnTouchListener { v, event ->
-                gestureDetector.onTouchEvent(event)
-                // Send normalized touch coordinates for warping
                 val normX = event.x / v.width
                 val normY = event.y / v.height
                 NativeInterface.updateTouch(normX, normY)

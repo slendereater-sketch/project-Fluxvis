@@ -18,10 +18,10 @@ public:
     void Render();
     void UpdateControls(float zoom, float warp, float dampening);
     void PushAudioData(const float* data, int length);
-    void NextPreset();
     void UpdateTouch(float x, float y);
 
-    private:    Engine();
+    private:
+    Engine();
     ~Engine();
 
     void SetupQuad();
@@ -43,7 +43,6 @@ public:
     int mWidth, mHeight;
     float mStartTime;
 
-    int mPreset = 0;
     float mTouchX = 0.5f;
     float mTouchY = 0.5f;
 
