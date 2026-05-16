@@ -21,7 +21,7 @@ bool AudioCapture::Start() {
            ->setSharingMode(oboe::SharingMode::Exclusive)
            ->setFormat(oboe::AudioFormat::Float)
            ->setChannelCount(oboe::ChannelCount::Mono)
-           ->setDataCallback(this); // Use setDataCallback specifically
+           ->setDataCallback(this);
 
     oboe::Result result = builder.openStream(&mStream);
     if (result != oboe::Result::OK) {
@@ -58,7 +58,6 @@ oboe::DataCallbackResult AudioCapture::onAudioReady(
 }
 
 void AudioCapture::ProcessFFT(const float* samples, int numFrames) {
-    // Fill buffer with newest samples (simple windowing)
     int framesToCopy = std::min(numFrames, FFT_SIZE);
     std::copy(samples, samples + framesToCopy, mBuffer.begin());
 
@@ -72,24 +71,20 @@ void AudioCapture::ProcessFFT(const float* samples, int numFrames) {
     AudioFeatures features;
     float totalEnergy = 0.0f;
     
-    // Extract 64 magnitude bins (first half of FFT)
     for (int i = 0; i < 64; ++i) {
         float mag = std::abs(fftData[i]);
         features.frequency_bins[i] = mag;
         totalEnergy += mag;
 
-        // Band categorization
         if (i < 8) features.bass += mag;
         else if (i < 32) features.mid += mag;
         else features.treble += mag;
     }
 
-    // Normalize
     features.bass /= 8.0f;
     features.mid /= 24.0f;
     features.treble /= 32.0f;
 
-    DetectBeat(totalEnergy);
     features.is_beat = mPrevEnergy > 0.0f && (totalEnergy > mPrevEnergy * 1.5f);
     mPrevEnergy = totalEnergy;
 
@@ -97,7 +92,7 @@ void AudioCapture::ProcessFFT(const float* samples, int numFrames) {
 }
 
 void AudioCapture::Radix2FFT(std::vector<std::complex<float>>& data) {
-    int n = data.size();
+    int n = static_cast<int>(data.size());
     if (n <= 1) return;
 
     std::vector<std::complex<float>> even(n / 2);
@@ -110,9 +105,10 @@ void AudioCapture::Radix2FFT(std::vector<std::complex<float>>& data) {
     Radix2FFT(even);
     Radix2FFT(odd);
 
+    const float pi = 3.14159265358979323846f;
     for (int k = 0; k < n / 2; ++k) {
-        // Fix polar by being explicit with float
-        std::complex<float> t = std::polar(1.0f, static_cast<float>(-2.0 * M_PI * k / n)) * odd[k];
+        float theta = -2.0f * pi * static_cast<float>(k) / static_cast<float>(n);
+        std::complex<float> t = std::polar(1.0f, theta) * odd[k];
         data[k] = even[k] + t;
         data[k + n / 2] = even[k] - t;
     }
@@ -128,5 +124,4 @@ void AudioCapture::PushData(const float* samples, int numFrames) {
 
 void AudioCapture::DetectBeat(float energy) {
     (void)energy;
-    // Basic energy derivative analysis handled in ProcessFFT for simplicity
 }
