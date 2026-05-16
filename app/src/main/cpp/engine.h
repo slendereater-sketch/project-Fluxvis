@@ -25,6 +25,8 @@ private:
 
     void CreateFBOs(int width, int height);
     void SetupUBO();
+    GLuint CompileShader(GLenum type, const char* source);
+    GLuint LinkProgram(GLuint vert, GLuint frag);
 
     static Engine* sInstance;
 

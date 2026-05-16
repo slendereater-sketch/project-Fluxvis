@@ -51,6 +51,61 @@ void Engine::InitGLES() {
 
     CreateFBOs(mWidth, mHeight);
     SetupUBO();
+
+    const char* vSrc = R"(#version 320 es
+        layout(location = 0) in vec2 a_pos;
+        void main() {
+            gl_Position = vec4(a_pos, 0.0, 1.0);
+        })";
+
+    // Fallback simple shader until we load the main one from assets
+    const char* fSrc = R"(#version 320 es
+        precision highp float;
+        layout(location = 0) out vec4 fragColor;
+        layout(std140, binding = 0) uniform NeuralWeights { float weights[100]; } u_tpu;
+        uniform sampler2D u_prevFrame;
+        uniform vec2 u_resolution;
+        uniform float u_time;
+        void main() {
+            vec2 uv = gl_FragCoord.xy / u_resolution;
+            vec3 color = texture(u_prevFrame, uv).rgb * 0.9;
+            color += vec3(u_tpu.weights[0], u_tpu.weights[1], u_tpu.weights[2]) * 0.1;
+            fragColor = vec4(color, 1.0);
+        })";
+
+    GLuint vShader = CompileShader(GL_VERTEX_SHADER, vSrc);
+    GLuint fShader = CompileShader(GL_FRAGMENT_SHADER, fSrc);
+    mProgram = LinkProgram(vShader, fShader);
+}
+
+GLuint Engine::CompileShader(GLenum type, const char* source) {
+    GLuint shader = glCreateShader(type);
+    glShaderSource(shader, 1, &source, nullptr);
+    glCompileShader(shader);
+    
+    GLint compiled;
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
+    if (!compiled) {
+        GLint infoLen = 0;
+        glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &infoLen);
+        if (infoLen > 1) {
+            char* infoLog = new char[infoLen];
+            glGetShaderInfoLog(shader, infoLen, nullptr, infoLog);
+            __android_log_print(ANDROID_LOG_ERROR, TAG, "Error compiling shader:\n%s", infoLog);
+            delete[] infoLog;
+        }
+        glDeleteShader(shader);
+        return 0;
+    }
+    return shader;
+}
+
+GLuint Engine::LinkProgram(GLuint vert, GLuint frag) {
+    GLuint prog = glCreateProgram();
+    glAttachShader(prog, vert);
+    glAttachShader(prog, frag);
+    glLinkProgram(prog);
+    return prog;
 }
 
 void Engine::CreateFBOs(int width, int height) {
