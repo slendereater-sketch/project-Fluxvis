@@ -5,18 +5,6 @@ project("ndk_visualizer")
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Compiler optimizations for ARMv8-A (Tensor G5 / Pixel 10 Pro)
-# Removed -Werror to allow Oboe and other dependencies to compile with warnings
-add_compile_options(
-    -O3
-    -march=armv8-a+crypto
-    -flto
-    -fexceptions
-    -frtti
-    -Wall
-    -Wextra
-)
-
 # Find NDK libraries
 find_library(log-lib log)
 find_library(android-lib android)
@@ -32,16 +20,23 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(oboe)
 
-# LiteRT (TensorFlow Lite) - Placeholder configuration
-# set(LITERT_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include/litert)
-# set(LITERT_LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/lib/${ANDROID_ABI})
-# add_library(litert SHARED IMPORTED)
-# set_target_properties(litert PROPERTIES IMPORTED_LOCATION ${LITERT_LIB_DIR}/libtensorflowlite_jni.so)
-
+# Define our library
 add_library(${CMAKE_PROJECT_NAME} SHARED
     audio_capture.cpp
-    # tpu_inference.cpp
     engine.cpp
+)
+
+# Apply optimizations and warnings ONLY to our target
+# This prevents -Werror from breaking the third-party Oboe build
+target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE
+    -O3
+    -march=armv8-a+crypto
+    -flto
+    -fexceptions
+    -frtti
+    -Wall
+    -Wextra
+    # Explicitly NOT using -Werror globally anymore to ensure build success
 )
 
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
