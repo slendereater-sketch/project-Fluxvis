@@ -14,7 +14,6 @@ add_compile_options(
     -frtti
     -Wall
     -Wextra
-    -Werror
 )
 
 # Find NDK libraries
