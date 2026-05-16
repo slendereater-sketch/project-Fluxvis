@@ -15,8 +15,6 @@ Engine* Engine::GetInstance() {
 
 Engine::Engine() {
     mAudio.Start();
-    for(int i=0; i<100; ++i) mWeights[i] = 0.1f;
-    
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     mStartTime = (float)ts.tv_sec + (float)ts.tv_nsec / 1e9f;
@@ -24,7 +22,6 @@ Engine::Engine() {
 
 Engine::~Engine() {
     TerminateGLES();
-    mAudio.Stop();
 }
 
 void Engine::SetSurface(ANativeWindow* window) {
@@ -38,7 +35,8 @@ void Engine::InitGLES() {
     const EGLint configAttribs[] = {
         EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
         EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
-        EGL_BLUE_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_RED_SIZE, 8,
+        EGL_BLUE_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_RED_SIZE, 8, EGL_ALPHA_SIZE, 8,
+        EGL_DEPTH_SIZE, 0, EGL_STENCIL_SIZE, 0,
         EGL_NONE
     };
     EGLConfig config;
@@ -54,37 +52,50 @@ void Engine::InitGLES() {
     mWidth = ANativeWindow_getWidth(mWindow);
     mHeight = ANativeWindow_getHeight(mWindow);
     
-    __android_log_print(ANDROID_LOG_INFO, TAG, "GLES Init: %dx%d", mWidth, mHeight);
-
     CreateFBOs(mWidth, mHeight);
-    SetupUBO();
     SetupQuad();
 
-    const char* vSrc = R"(#version 300 es
+    const char* vSrc = R"(#version 320 es
         layout(location = 0) in vec2 a_pos;
+        out vec2 v_uv;
         void main() {
+            v_uv = a_pos * 0.5 + 0.5;
             gl_Position = vec4(a_pos, 0.0, 1.0);
         })";
 
-    // DEBUG SHADER: Rainbow moving gradient
-    const char* fSrc = R"(#version 300 es
+    const char* fSrc = R"(#version 320 es
         precision highp float;
+        in vec2 v_uv;
         layout(location = 0) out vec4 fragColor;
+        uniform sampler2D u_prevFrame;
         uniform vec2 u_resolution;
         uniform float u_time;
+        uniform float u_bass;
+
         void main() {
-            vec2 uv = gl_FragCoord.xy / u_resolution;
-            vec3 rainbow = 0.5 + 0.5 * cos(u_time + uv.xyx + vec3(0,2,4));
-            fragColor = vec4(rainbow, 1.0);
+            vec2 uv = v_uv;
+            vec2 p = uv - 0.5;
+            p.x *= u_resolution.x / u_resolution.y;
+            
+            float d = length(p);
+            float ring = smoothstep(0.01, 0.0, abs(d - 0.2 - u_bass * 0.1));
+            
+            vec3 color = ring * vec3(0.0, 0.7, 1.0);
+            
+            // Feedback
+            vec3 prev = texture(u_prevFrame, (uv - 0.5) * 0.98 + 0.5).rgb;
+            color += prev * 0.95;
+            
+            fragColor = vec4(color, 1.0);
         })";
 
-    const char* blitFSrc = R"(#version 300 es
+    const char* blitFSrc = R"(#version 320 es
         precision highp float;
+        in vec2 v_uv;
         layout(location = 0) out vec4 fragColor;
         uniform sampler2D u_tex;
         void main() {
-            vec2 uv = gl_FragCoord.xy / vec2(textureSize(u_tex, 0));
-            fragColor = texture(u_tex, uv);
+            fragColor = texture(u_tex, v_uv);
         })";
 
     mProgram = LinkProgram(CompileShader(GL_VERTEX_SHADER, vSrc), CompileShader(GL_FRAGMENT_SHADER, fSrc));
@@ -92,6 +103,7 @@ void Engine::InitGLES() {
 
     mResLoc = glGetUniformLocation(mProgram, "u_resolution");
     mTimeLoc = glGetUniformLocation(mProgram, "u_time");
+    mPrevLoc = glGetUniformLocation(mProgram, "u_prevFrame");
     mBlitTexLoc = glGetUniformLocation(mBlitProgram, "u_tex");
 }
 
@@ -116,39 +128,32 @@ void Engine::CreateFBOs(int width, int height) {
     }
 }
 
-void Engine::SetupUBO() {
-    glGenBuffers(1, &mUBO);
-    glBindBuffer(GL_UNIFORM_BUFFER, mUBO);
-    glBufferData(GL_UNIFORM_BUFFER, 100 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
-    glBindBufferBase(GL_UNIFORM_BUFFER, 0, mUBO);
-}
-
 void Engine::Render() {
     if (!mProgram || !mBlitProgram) return;
 
-    // Force Magenta background as a debug signal
-    glClearColor(1.0f, 0.0f, 1.0f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
-
+    auto audio = mAudio.GetLatestFeatures();
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     float currentTime = (float)ts.tv_sec + (float)ts.tv_nsec / 1e9f - mStartTime;
 
     int nextIdx = 1 - mPingPongIdx;
     
-    // Pass 1: Draw Rainbow to FBO
     glBindFramebuffer(GL_FRAMEBUFFER, mFBO[nextIdx]);
     glViewport(0, 0, mWidth, mHeight);
     glUseProgram(mProgram);
     glUniform2f(mResLoc, (float)mWidth, (float)mHeight);
     glUniform1f(mTimeLoc, currentTime);
+    glUniform1f(glGetUniformLocation(mProgram, "u_bass"), audio.bass);
     
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, mTextures[mPingPongIdx]);
+    glUniform1i(mPrevLoc, 0);
+
     glBindBuffer(GL_ARRAY_BUFFER, mQuadVBO);
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
-    // Pass 2: Draw FBO to Screen
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glViewport(0, 0, mWidth, mHeight);
     glUseProgram(mBlitProgram);
@@ -161,17 +166,9 @@ void Engine::Render() {
     mPingPongIdx = nextIdx;
 }
 
-void Engine::UpdateControls(float zoom, float warp, float dampening) {
-    (void)zoom; (void)warp; (void)dampening;
-}
-
-void Engine::PushAudioData(const float* data, int length) { (void)data; (void)length; }
-
 void Engine::TerminateGLES() {
     if (mDisplay != EGL_NO_DISPLAY) {
         eglMakeCurrent(mDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-        if (mContext != EGL_NO_CONTEXT) eglDestroyContext(mDisplay, mContext);
-        if (mSurface != EGL_NO_SURFACE) eglDestroySurface(mDisplay, mSurface);
         eglTerminate(mDisplay);
     }
 }
@@ -180,13 +177,6 @@ GLuint Engine::CompileShader(GLenum type, const char* source) {
     GLuint shader = glCreateShader(type);
     glShaderSource(shader, 1, &source, nullptr);
     glCompileShader(shader);
-    GLint compiled;
-    glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
-    if (!compiled) {
-        char log[512]; glGetShaderInfoLog(shader, 512, nullptr, log);
-        __android_log_print(ANDROID_LOG_ERROR, TAG, "Shader Error: %s", log);
-        return 0;
-    }
     return shader;
 }
 
@@ -199,18 +189,20 @@ GLuint Engine::LinkProgram(GLuint vert, GLuint frag) {
 
 extern "C" {
     JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_init(JNIEnv* env, jobject obj, jobject surface) {
-        (void)env; (void)obj;
         ANativeWindow* window = ANativeWindow_fromSurface(env, surface);
         Engine::GetInstance()->SetSurface(window);
         Engine::GetInstance()->InitGLES();
     }
     JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_renderFrame(JNIEnv* env, jobject obj) {
-        (void)env; (void)obj; Engine::GetInstance()->Render();
+        Engine::GetInstance()->Render();
     }
     JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_updateControls(JNIEnv* env, jobject obj, jfloat zoom, jfloat warp, jfloat dampening) {
-        (void)env; (void)obj; Engine::GetInstance()->UpdateControls(zoom, warp, dampening);
+        // ...
     }
     JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_pushAudioData(JNIEnv* env, jobject obj, jfloatArray data) {
-        (void)env; (void)obj; (void)data;
+        jfloat* buffer = env->GetFloatArrayElements(data, nullptr);
+        jsize length = env->GetArrayLength(data);
+        Engine::GetInstance()->PushAudioData(buffer, (int)length);
+        env->ReleaseFloatArrayElements(data, buffer, JNI_ABORT);
     }
 }

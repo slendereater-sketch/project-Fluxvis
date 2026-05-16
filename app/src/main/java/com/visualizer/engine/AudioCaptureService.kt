@@ -3,12 +3,14 @@ package com.visualizer.engine
 import android.app.*
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioPlaybackCaptureConfiguration
 import android.media.AudioRecord
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
+import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 
@@ -17,23 +19,52 @@ class AudioCaptureService : Service() {
     private var audioRecord: AudioRecord? = null
     private var isCapturing = false
 
+    companion object {
+        private const val NOTIFICATION_ID = 101
+        private const val CHANNEL_ID = "FluxvisCapture"
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        createNotificationChannel()
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val resultCode = intent?.getIntExtra("RESULT_CODE", Activity.RESULT_CANCELED) ?: Activity.RESULT_CANCELED
-        val data = intent?.getParcelableExtra<Intent>("DATA")
+        val data = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent?.getParcelableExtra("DATA", Intent::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent?.getParcelableExtra("DATA")
+        }
 
         if (resultCode == Activity.RESULT_OK && data != null) {
-            createNotificationChannel()
-            val notification = NotificationCompat.Builder(this, "CHANNEL_ID")
-                .setContentTitle("Fluxvis Audio Capture")
-                .setContentText("Capturing system audio...")
+            val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle("Fluxvis is Active")
+                .setContentText("Visualizing system audio...")
                 .setSmallIcon(android.R.drawable.ic_media_play)
+                .setOngoing(true)
                 .build()
 
-            startForeground(1, notification)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
 
             val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
             mediaProjection = projectionManager.getMediaProjection(resultCode, data)
+            
+            // Register callback to handle stop events
+            mediaProjection?.registerCallback(object : MediaProjection.Callback() {
+                override fun onStop() {
+                    stopSelf()
+                }
+            }, null)
+
             startAudioCapture()
+        } else {
+            stopSelf()
         }
 
         return START_NOT_STICKY
@@ -45,7 +76,6 @@ class AudioCaptureService : Service() {
         val config = AudioPlaybackCaptureConfiguration.Builder(mp)
             .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
             .addMatchingUsage(AudioAttributes.USAGE_GAME)
-            .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
             .build()
 
         val audioFormat = AudioFormat.Builder()
@@ -58,6 +88,7 @@ class AudioCaptureService : Service() {
             audioRecord = AudioRecord.Builder()
                 .setAudioPlaybackCaptureConfig(config)
                 .setAudioFormat(audioFormat)
+                .setBufferSizeInBytes(2048)
                 .build()
 
             audioRecord?.startRecording()
@@ -79,13 +110,13 @@ class AudioCaptureService : Service() {
     }
 
     private fun createNotificationChannel() {
-        val serviceChannel = NotificationChannel(
-            "CHANNEL_ID",
-            "Audio Capture Channel",
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            "Audio Visualizer Service",
             NotificationManager.IMPORTANCE_LOW
         )
         val manager = getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(serviceChannel)
+        manager.createNotificationChannel(channel)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
