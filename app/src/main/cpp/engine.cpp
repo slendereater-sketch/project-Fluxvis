@@ -62,7 +62,6 @@ void Engine::InitGLES() {
             gl_Position = vec4(a_pos, 0.0, 1.0);
         })";
 
-    // RECONSTRUCTED MANDALA SHADER
     const char* fSrc = R"(#version 320 es
         precision highp float;
         in vec2 v_uv;
@@ -89,14 +88,12 @@ void Engine::InitGLES() {
             vec2 uv = v_uv - 0.5;
             uv.x *= u_resolution.x / u_resolution.y;
             
-            // Mandala Symmetry
             float segments = 8.0; 
             float r = length(uv);
             float a = atan(uv.y, uv.x);
             float ma = mod(a, 2.0 * 3.14159 / segments);
             vec2 p = vec2(cos(ma), sin(ma)) * r;
             
-            // Fractal Iterations (Folding & Rotating)
             float d = 1e10;
             for(int i = 0; i < 6; i++) {
                 p = abs(p) - (0.2 + u_bass * 0.15);
@@ -109,7 +106,6 @@ void Engine::InitGLES() {
             vec3 col = hsv2rgb(vec3(r * 0.5 + u_time * 0.05, 0.7, 1.0));
             col *= glow * (1.0 + u_bass * 5.0);
             
-            // Visual Resonance (Feedback)
             vec3 prev = texture(u_prevFrame, (v_uv - 0.5) * 0.98 + 0.5).rgb;
             col += prev * 0.92;
             
@@ -195,6 +191,15 @@ void Engine::Render() {
     mPingPongIdx = nextIdx;
 }
 
+void Engine::UpdateControls(float zoom, float warp, float dampening) {
+    std::lock_guard<std::mutex> lock(mControlMutex);
+    mUserControls[0] = zoom; mUserControls[1] = warp; mUserControls[2] = dampening;
+}
+
+void Engine::PushAudioData(const float* data, int length) {
+    mAudio.PushData(data, length);
+}
+
 void Engine::TerminateGLES() {
     if (mDisplay != EGL_NO_DISPLAY) {
         eglMakeCurrent(mDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
@@ -218,17 +223,19 @@ GLuint Engine::LinkProgram(GLuint vert, GLuint frag) {
 
 extern "C" {
     JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_init(JNIEnv* env, jobject obj, jobject surface) {
+        (void)env; (void)obj;
         ANativeWindow* window = ANativeWindow_fromSurface(env, surface);
         Engine::GetInstance()->SetSurface(window);
         Engine::GetInstance()->InitGLES();
     }
     JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_renderFrame(JNIEnv* env, jobject obj) {
-        Engine::GetInstance()->Render();
+        (void)env; (void)obj; Engine::GetInstance()->Render();
     }
     JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_updateControls(JNIEnv* env, jobject obj, jfloat zoom, jfloat warp, jfloat dampening) {
-        Engine::GetInstance()->UpdateControls(zoom, warp, dampening);
+        (void)env; (void)obj; Engine::GetInstance()->UpdateControls(zoom, warp, dampening);
     }
     JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_pushAudioData(JNIEnv* env, jobject obj, jfloatArray data) {
+        (void)obj;
         jfloat* buffer = env->GetFloatArrayElements(data, nullptr);
         jsize length = env->GetArrayLength(data);
         Engine::GetInstance()->PushAudioData(buffer, (int)length);
