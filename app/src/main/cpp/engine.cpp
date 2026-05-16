@@ -14,7 +14,6 @@ Engine* Engine::GetInstance() {
 
 Engine::Engine() {
     mAudio.Start();
-    // mTPU.Initialize("/data/data/com.visualizer.engine/files/tpu_mixer.tflite");
     for(int i=0; i<100; ++i) mWeights[i] = 0.1f;
 }
 
@@ -52,8 +51,6 @@ void Engine::InitGLES() {
 
     CreateFBOs(mWidth, mHeight);
     SetupUBO();
-    
-    // Shader compilation omitted for brevity, assuming loaded from assets
 }
 
 void Engine::CreateFBOs(int width, int height) {
@@ -79,22 +76,18 @@ void Engine::SetupUBO() {
 
 void Engine::Render() {
     auto audio = mAudio.GetLatestFeatures();
-    // float weights[100];
     
     {
         std::lock_guard<std::mutex> lock(mControlMutex);
-        // mTPU.ProcessNeuralWeights(audio, mUserControls, weights);
         mWeights[0] = audio.bass;
         mWeights[1] = audio.mid;
         mWeights[2] = audio.treble;
-        mWeights[26] = mUserControls[1]; // Warp intensity
+        mWeights[26] = mUserControls[1]; 
     }
 
-    // Update UBO
     glBindBuffer(GL_UNIFORM_BUFFER, mUBO);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, 100 * sizeof(float), mWeights);
 
-    // Ping-pong render
     int nextIdx = 1 - mPingPongIdx;
     glBindFramebuffer(GL_FRAMEBUFFER, mFBO[nextIdx]);
     glViewport(0, 0, mWidth, mHeight);
@@ -102,11 +95,8 @@ void Engine::Render() {
     glUseProgram(mProgram);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, mTextures[mPingPongIdx]);
-    // Draw full-screen quad...
     
-    // Final composite to screen
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    // Draw nextIdx texture to screen...
 
     eglSwapBuffers(mDisplay, mSurface);
     mPingPongIdx = nextIdx;
@@ -124,13 +114,13 @@ void Engine::PushAudioData(const float* data, int length) {
 }
 
 void Engine::TerminateGLES() {
-    // Basic cleanup
+    // Cleanup
 }
 
 // JNI Bindings
 extern "C" {
     JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_init(JNIEnv* env, jobject obj, jobject surface) {
-        (void)obj;
+        (void)env; (void)obj;
         ANativeWindow* window = ANativeWindow_fromSurface(env, surface);
         Engine::GetInstance()->SetSurface(window);
         Engine::GetInstance()->InitGLES();
@@ -150,7 +140,7 @@ extern "C" {
         (void)obj;
         jfloat* buffer = env->GetFloatArrayElements(data, nullptr);
         jsize length = env->GetArrayLength(data);
-        Engine::GetInstance()->PushAudioData(buffer, length);
+        Engine::GetInstance()->PushAudioData(buffer, static_cast<int>(length));
         env->ReleaseFloatArrayElements(data, buffer, JNI_ABORT);
     }
 }

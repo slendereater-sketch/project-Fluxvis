@@ -17,7 +17,7 @@ struct AudioFeatures {
 class AudioCapture : public oboe::AudioStreamDataCallback {
 public:
     AudioCapture();
-    ~AudioCapture();
+    virtual ~AudioCapture();
 
     bool Start();
     void Stop();
@@ -37,11 +37,9 @@ private:
     oboe::AudioStream *mStream = nullptr;
     mutable std::atomic<AudioFeatures> mLatestFeatures;
     
-    // Internal FFT state
-    static constexpr int FFT_SIZE = 128; // To get 64 bins
+    static constexpr int FFT_SIZE = 128;
     std::vector<float> mBuffer;
     float mPrevEnergy = 0.0f;
 
-    // Simple Radix-2 FFT implementation
     void Radix2FFT(std::vector<std::complex<float>>& data);
 };

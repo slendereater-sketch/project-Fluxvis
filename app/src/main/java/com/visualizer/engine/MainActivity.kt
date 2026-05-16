@@ -11,7 +11,6 @@ import android.media.AudioRecord
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Bundle
-import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import androidx.activity.ComponentActivity
@@ -50,9 +49,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startAudioCapture() {
-        val mediaProjection = mediaProjection ?: return
+        val mp = mediaProjection ?: return
         
-        val config = AudioPlaybackCaptureConfiguration.Builder(mediaProjection)
+        val config = AudioPlaybackCaptureConfiguration.Builder(mp)
             .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
             .addMatchingUsage(AudioAttributes.USAGE_GAME)
             .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
@@ -107,6 +106,7 @@ class MainActivity : ComponentActivity() {
                                         Thread {
                                             while (true) {
                                                 NativeInterface.renderFrame()
+                                                Thread.sleep(16) // ~60fps
                                             }
                                         }.start()
                                     }
