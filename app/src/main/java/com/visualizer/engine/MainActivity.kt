@@ -4,12 +4,6 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.media.AudioAttributes
-import android.media.AudioFormat
-import android.media.AudioPlaybackCaptureConfiguration
-import android.media.AudioRecord
-import android.media.projection.MediaProjection
-import android.media.projection.MediaProjectionManager
 import android.os.Bundle
 import android.view.SurfaceHolder
 import android.view.SurfaceView
@@ -23,12 +17,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.visualizer.engine.ui.ControlPanel
+import android.media.projection.MediaProjectionManager
 
 class MainActivity : ComponentActivity() {
-    private var mediaProjection: MediaProjection? = null
-    private var audioRecord: AudioRecord? = null
-    private var isCapturing = false
-
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted: Boolean ->
@@ -41,50 +32,11 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == RESULT_OK) {
-            val data = result.data ?: return@registerForActivityResult
-            val mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-            mediaProjection = mediaProjectionManager.getMediaProjection(result.resultCode, data)
-            startAudioCapture()
-        }
-    }
-
-    private fun startAudioCapture() {
-        val mp = mediaProjection ?: return
-        
-        val config = AudioPlaybackCaptureConfiguration.Builder(mp)
-            .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
-            .addMatchingUsage(AudioAttributes.USAGE_GAME)
-            .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
-            .build()
-
-        val audioFormat = AudioFormat.Builder()
-            .setEncoding(AudioFormat.ENCODING_PCM_FLOAT)
-            .setSampleRate(44100)
-            .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
-            .build()
-
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return
-
-        try {
-            audioRecord = AudioRecord.Builder()
-                .setAudioPlaybackCaptureConfig(config)
-                .setAudioFormat(audioFormat)
-                .build()
-
-            audioRecord?.startRecording()
-            isCapturing = true
-
-            Thread {
-                val buffer = FloatArray(1024)
-                while (isCapturing) {
-                    val read = audioRecord?.read(buffer, 0, buffer.size, AudioRecord.READ_BLOCKING) ?: 0
-                    if (read > 0) {
-                        NativeInterface.pushAudioData(buffer.sliceArray(0 until read))
-                    }
-                }
-            }.start()
-        } catch (e: Exception) {
-            e.printStackTrace()
+            val serviceIntent = Intent(this, AudioCaptureService::class.java).apply {
+                putExtra("RESULT_CODE", result.resultCode)
+                putExtra("DATA", result.data)
+            }
+            ContextCompat.startForegroundService(this, serviceIntent)
         }
     }
 
@@ -106,7 +58,7 @@ class MainActivity : ComponentActivity() {
                                         Thread {
                                             while (true) {
                                                 NativeInterface.renderFrame()
-                                                Thread.sleep(16) // ~60fps
+                                                Thread.sleep(16)
                                             }
                                         }.start()
                                     }
@@ -138,9 +90,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        isCapturing = false
-        audioRecord?.stop()
-        audioRecord?.release()
-        mediaProjection?.stop()
+        stopService(Intent(this, AudioCaptureService::class.java))
     }
 }
