@@ -2,6 +2,7 @@
 #include <jni.h>
 #include <android/native_window_jni.h>
 #include <android/log.h>
+#include <time.h>
 
 #define TAG "Engine"
 
@@ -15,6 +16,10 @@ Engine* Engine::GetInstance() {
 Engine::Engine() {
     mAudio.Start();
     for(int i=0; i<100; ++i) mWeights[i] = 0.1f;
+    
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    mStartTime = (float)ts.tv_sec + (float)ts.tv_nsec / 1e9f;
 }
 
 Engine::~Engine() {
@@ -51,61 +56,60 @@ void Engine::InitGLES() {
 
     CreateFBOs(mWidth, mHeight);
     SetupUBO();
+    SetupQuad();
 
-    const char* vSrc = R"(#version 320 es
+    const char* vSrc = R"(#version 300 es
         layout(location = 0) in vec2 a_pos;
         void main() {
             gl_Position = vec4(a_pos, 0.0, 1.0);
         })";
 
-    // Fallback simple shader until we load the main one from assets
-    const char* fSrc = R"(#version 320 es
+    const char* fSrc = R"(#version 300 es
         precision highp float;
         layout(location = 0) out vec4 fragColor;
         layout(std140, binding = 0) uniform NeuralWeights { float weights[100]; } u_tpu;
         uniform sampler2D u_prevFrame;
         uniform vec2 u_resolution;
         uniform float u_time;
+
         void main() {
             vec2 uv = gl_FragCoord.xy / u_resolution;
-            vec3 color = texture(u_prevFrame, uv).rgb * 0.9;
-            color += vec3(u_tpu.weights[0], u_tpu.weights[1], u_tpu.weights[2]) * 0.1;
+            
+            // Basic reactive effect
+            float bass = u_tpu.weights[0];
+            float mid = u_tpu.weights[1];
+            float treble = u_tpu.weights[2];
+            
+            vec3 prev = texture(u_prevFrame, (uv - 0.5) * 0.99 + 0.5).rgb;
+            
+            float dist = length(uv - 0.5);
+            float ring = smoothstep(0.1 + bass * 0.1, 0.0, abs(dist - 0.2 - mid * 0.2));
+            
+            vec3 color = vec3(ring) * vec3(1.0, 0.5, 0.2);
+            color += prev * 0.95; // Feedback loop
+            
             fragColor = vec4(color, 1.0);
         })";
 
     GLuint vShader = CompileShader(GL_VERTEX_SHADER, vSrc);
     GLuint fShader = CompileShader(GL_FRAGMENT_SHADER, fSrc);
     mProgram = LinkProgram(vShader, fShader);
+
+    mResLoc = glGetUniformLocation(mProgram, "u_resolution");
+    mTimeLoc = glGetUniformLocation(mProgram, "u_time");
+    mPrevLoc = glGetUniformLocation(mProgram, "u_prevFrame");
 }
 
-GLuint Engine::CompileShader(GLenum type, const char* source) {
-    GLuint shader = glCreateShader(type);
-    glShaderSource(shader, 1, &source, nullptr);
-    glCompileShader(shader);
-    
-    GLint compiled;
-    glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
-    if (!compiled) {
-        GLint infoLen = 0;
-        glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &infoLen);
-        if (infoLen > 1) {
-            char* infoLog = new char[infoLen];
-            glGetShaderInfoLog(shader, infoLen, nullptr, infoLog);
-            __android_log_print(ANDROID_LOG_ERROR, TAG, "Error compiling shader:\n%s", infoLog);
-            delete[] infoLog;
-        }
-        glDeleteShader(shader);
-        return 0;
-    }
-    return shader;
-}
-
-GLuint Engine::LinkProgram(GLuint vert, GLuint frag) {
-    GLuint prog = glCreateProgram();
-    glAttachShader(prog, vert);
-    glAttachShader(prog, frag);
-    glLinkProgram(prog);
-    return prog;
+void Engine::SetupQuad() {
+    float vertices[] = {
+        -1.0f, -1.0f,
+         1.0f, -1.0f,
+        -1.0f,  1.0f,
+         1.0f,  1.0f
+    };
+    glGenBuffers(1, &mQuadVBO);
+    glBindBuffer(GL_ARRAY_BUFFER, mQuadVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
 }
 
 void Engine::CreateFBOs(int width, int height) {
@@ -116,6 +120,8 @@ void Engine::CreateFBOs(int width, int height) {
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_HALF_FLOAT, nullptr);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         
         glBindFramebuffer(GL_FRAMEBUFFER, mFBO[i]);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, mTextures[i], 0);
@@ -130,8 +136,13 @@ void Engine::SetupUBO() {
 }
 
 void Engine::Render() {
+    if (!mProgram) return;
+
     auto audio = mAudio.GetLatestFeatures();
-    
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    float currentTime = (float)ts.tv_sec + (float)ts.tv_nsec / 1e9f - mStartTime;
+
     {
         std::lock_guard<std::mutex> lock(mControlMutex);
         mWeights[0] = audio.bass;
@@ -144,14 +155,30 @@ void Engine::Render() {
     glBufferSubData(GL_UNIFORM_BUFFER, 0, 100 * sizeof(float), mWeights);
 
     int nextIdx = 1 - mPingPongIdx;
+    
+    // 1. Render to FBO
     glBindFramebuffer(GL_FRAMEBUFFER, mFBO[nextIdx]);
     glViewport(0, 0, mWidth, mHeight);
     
     glUseProgram(mProgram);
+    glUniform2f(mResLoc, (float)mWidth, (float)mHeight);
+    glUniform1f(mTimeLoc, currentTime);
+    
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, mTextures[mPingPongIdx]);
-    
+    glUniform1i(mPrevLoc, 0);
+
+    glBindBuffer(GL_ARRAY_BUFFER, mQuadVBO);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+    // 2. Composite to Screen
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glViewport(0, 0, mWidth, mHeight);
+    // Reuse program or use a simple blit shader
+    glBindTexture(GL_TEXTURE_2D, mTextures[nextIdx]);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
     eglSwapBuffers(mDisplay, mSurface);
     mPingPongIdx = nextIdx;
@@ -169,10 +196,37 @@ void Engine::PushAudioData(const float* data, int length) {
 }
 
 void Engine::TerminateGLES() {
-    // Cleanup
+    if (mDisplay != EGL_NO_DISPLAY) {
+        eglMakeCurrent(mDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+        if (mContext != EGL_NO_CONTEXT) eglDestroyContext(mDisplay, mContext);
+        if (mSurface != EGL_NO_SURFACE) eglDestroySurface(mDisplay, mSurface);
+        eglTerminate(mDisplay);
+    }
 }
 
-// JNI Bindings
+GLuint Engine::CompileShader(GLenum type, const char* source) {
+    GLuint shader = glCreateShader(type);
+    glShaderSource(shader, 1, &source, nullptr);
+    glCompileShader(shader);
+    GLint compiled;
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
+    if (!compiled) {
+        char infoLog[512];
+        glGetShaderInfoLog(shader, 512, nullptr, infoLog);
+        __android_log_print(ANDROID_LOG_ERROR, TAG, "Shader Error: %s", infoLog);
+        return 0;
+    }
+    return shader;
+}
+
+GLuint Engine::LinkProgram(GLuint vert, GLuint frag) {
+    GLuint prog = glCreateProgram();
+    glAttachShader(prog, vert);
+    glAttachShader(prog, frag);
+    glLinkProgram(prog);
+    return prog;
+}
+
 extern "C" {
     JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_init(JNIEnv* env, jobject obj, jobject surface) {
         (void)env; (void)obj;
@@ -195,7 +249,7 @@ extern "C" {
         (void)obj;
         jfloat* buffer = env->GetFloatArrayElements(data, nullptr);
         jsize length = env->GetArrayLength(data);
-        Engine::GetInstance()->PushAudioData(buffer, static_cast<int>(length));
+        Engine::GetInstance()->PushAudioData(buffer, (int)length);
         env->ReleaseFloatArrayElements(data, buffer, JNI_ABORT);
     }
 }
