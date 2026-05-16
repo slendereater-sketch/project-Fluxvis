@@ -36,7 +36,6 @@ void Engine::InitGLES() {
         EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
         EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
         EGL_BLUE_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_RED_SIZE, 8, EGL_ALPHA_SIZE, 8,
-        EGL_DEPTH_SIZE, 0, EGL_STENCIL_SIZE, 0,
         EGL_NONE
     };
     EGLConfig config;
@@ -63,6 +62,7 @@ void Engine::InitGLES() {
             gl_Position = vec4(a_pos, 0.0, 1.0);
         })";
 
+    // RECONSTRUCTED MANDALA SHADER
     const char* fSrc = R"(#version 320 es
         precision highp float;
         in vec2 v_uv;
@@ -71,22 +71,49 @@ void Engine::InitGLES() {
         uniform vec2 u_resolution;
         uniform float u_time;
         uniform float u_bass;
+        uniform float u_mid;
+        uniform float u_high;
+
+        mat2 rot(float a) { 
+            float s = sin(a); float c = cos(a);
+            return mat2(c, -s, s, c);
+        }
+
+        vec3 hsv2rgb(vec3 c) {
+            vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+            vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+            return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+        }
 
         void main() {
-            vec2 uv = v_uv;
-            vec2 p = uv - 0.5;
-            p.x *= u_resolution.x / u_resolution.y;
+            vec2 uv = v_uv - 0.5;
+            uv.x *= u_resolution.x / u_resolution.y;
             
-            float d = length(p);
-            float ring = smoothstep(0.01, 0.0, abs(d - 0.2 - u_bass * 0.1));
+            // Mandala Symmetry
+            float segments = 8.0; 
+            float r = length(uv);
+            float a = atan(uv.y, uv.x);
+            float ma = mod(a, 2.0 * 3.14159 / segments);
+            vec2 p = vec2(cos(ma), sin(ma)) * r;
             
-            vec3 color = ring * vec3(0.0, 0.7, 1.0);
+            // Fractal Iterations (Folding & Rotating)
+            float d = 1e10;
+            for(int i = 0; i < 6; i++) {
+                p = abs(p) - (0.2 + u_bass * 0.15);
+                p *= rot(u_time * 0.1 + u_mid * 0.3);
+                p *= 1.1 + u_high * 0.05;
+                d = min(d, length(p) - 0.05);
+            }
             
-            // Feedback
-            vec3 prev = texture(u_prevFrame, (uv - 0.5) * 0.98 + 0.5).rgb;
-            color += prev * 0.95;
+            float glow = 0.005 / (0.005 + d);
+            vec3 col = hsv2rgb(vec3(r * 0.5 + u_time * 0.05, 0.7, 1.0));
+            col *= glow * (1.0 + u_bass * 5.0);
             
-            fragColor = vec4(color, 1.0);
+            // Visual Resonance (Feedback)
+            vec3 prev = texture(u_prevFrame, (v_uv - 0.5) * 0.98 + 0.5).rgb;
+            col += prev * 0.92;
+            
+            fragColor = vec4(col, 1.0);
         })";
 
     const char* blitFSrc = R"(#version 320 es
@@ -144,6 +171,8 @@ void Engine::Render() {
     glUniform2f(mResLoc, (float)mWidth, (float)mHeight);
     glUniform1f(mTimeLoc, currentTime);
     glUniform1f(glGetUniformLocation(mProgram, "u_bass"), audio.bass);
+    glUniform1f(glGetUniformLocation(mProgram, "u_mid"), audio.mid);
+    glUniform1f(glGetUniformLocation(mProgram, "u_high"), audio.treble);
     
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, mTextures[mPingPongIdx]);
@@ -166,15 +195,6 @@ void Engine::Render() {
     mPingPongIdx = nextIdx;
 }
 
-void Engine::UpdateControls(float zoom, float warp, float dampening) {
-    std::lock_guard<std::mutex> lock(mControlMutex);
-    mUserControls[0] = zoom; mUserControls[1] = warp; mUserControls[2] = dampening;
-}
-
-void Engine::PushAudioData(const float* data, int length) {
-    mAudio.PushData(data, length);
-}
-
 void Engine::TerminateGLES() {
     if (mDisplay != EGL_NO_DISPLAY) {
         eglMakeCurrent(mDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
@@ -195,8 +215,6 @@ GLuint Engine::LinkProgram(GLuint vert, GLuint frag) {
     glLinkProgram(prog);
     return prog;
 }
-
-void Engine::SetupUBO() {}
 
 extern "C" {
     JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_init(JNIEnv* env, jobject obj, jobject surface) {
