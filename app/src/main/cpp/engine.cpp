@@ -71,42 +71,38 @@ void Engine::InitGLES() {
         uniform sampler2D u_prevFrame;
         uniform vec2 u_resolution;
         uniform float u_time;
-
         void main() {
             vec2 uv = gl_FragCoord.xy / u_resolution;
-            
-            // Basic reactive effect
             float bass = u_tpu.weights[0];
             float mid = u_tpu.weights[1];
-            float treble = u_tpu.weights[2];
-            
-            vec3 prev = texture(u_prevFrame, (uv - 0.5) * 0.99 + 0.5).rgb;
-            
+            vec3 prev = texture(u_prevFrame, (uv - 0.5) * 0.98 + 0.5).rgb;
             float dist = length(uv - 0.5);
-            float ring = smoothstep(0.1 + bass * 0.1, 0.0, abs(dist - 0.2 - mid * 0.2));
-            
-            vec3 color = vec3(ring) * vec3(1.0, 0.5, 0.2);
-            color += prev * 0.95; // Feedback loop
-            
+            float ring = smoothstep(0.05 + bass * 0.2, 0.0, abs(dist - 0.2 - mid * 0.3));
+            vec3 color = vec3(ring) * vec3(0.0, 0.8, 1.0);
+            color += prev * 0.97;
             fragColor = vec4(color, 1.0);
         })";
 
-    GLuint vShader = CompileShader(GL_VERTEX_SHADER, vSrc);
-    GLuint fShader = CompileShader(GL_FRAGMENT_SHADER, fSrc);
-    mProgram = LinkProgram(vShader, fShader);
+    const char* blitFSrc = R"(#version 300 es
+        precision highp float;
+        layout(location = 0) out vec4 fragColor;
+        uniform sampler2D u_tex;
+        void main() {
+            vec2 uv = gl_FragCoord.xy / vec2(textureSize(u_tex, 0));
+            fragColor = texture(u_tex, uv);
+        })";
+
+    mProgram = LinkProgram(CompileShader(GL_VERTEX_SHADER, vSrc), CompileShader(GL_FRAGMENT_SHADER, fSrc));
+    mBlitProgram = LinkProgram(CompileShader(GL_VERTEX_SHADER, vSrc), CompileShader(GL_FRAGMENT_SHADER, blitFSrc));
 
     mResLoc = glGetUniformLocation(mProgram, "u_resolution");
     mTimeLoc = glGetUniformLocation(mProgram, "u_time");
     mPrevLoc = glGetUniformLocation(mProgram, "u_prevFrame");
+    mBlitTexLoc = glGetUniformLocation(mBlitProgram, "u_tex");
 }
 
 void Engine::SetupQuad() {
-    float vertices[] = {
-        -1.0f, -1.0f,
-         1.0f, -1.0f,
-        -1.0f,  1.0f,
-         1.0f,  1.0f
-    };
+    float vertices[] = {-1, -1, 1, -1, -1, 1, 1, 1};
     glGenBuffers(1, &mQuadVBO);
     glBindBuffer(GL_ARRAY_BUFFER, mQuadVBO);
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
@@ -120,9 +116,6 @@ void Engine::CreateFBOs(int width, int height) {
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_HALF_FLOAT, nullptr);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        
         glBindFramebuffer(GL_FRAMEBUFFER, mFBO[i]);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, mTextures[i], 0);
     }
@@ -136,7 +129,7 @@ void Engine::SetupUBO() {
 }
 
 void Engine::Render() {
-    if (!mProgram) return;
+    if (!mProgram || !mBlitProgram) return;
 
     auto audio = mAudio.GetLatestFeatures();
     struct timespec ts;
@@ -148,7 +141,6 @@ void Engine::Render() {
         mWeights[0] = audio.bass;
         mWeights[1] = audio.mid;
         mWeights[2] = audio.treble;
-        mWeights[26] = mUserControls[1]; 
     }
 
     glBindBuffer(GL_UNIFORM_BUFFER, mUBO);
@@ -156,28 +148,27 @@ void Engine::Render() {
 
     int nextIdx = 1 - mPingPongIdx;
     
-    // 1. Render to FBO
+    // Pass 1: Effect
     glBindFramebuffer(GL_FRAMEBUFFER, mFBO[nextIdx]);
     glViewport(0, 0, mWidth, mHeight);
-    
     glUseProgram(mProgram);
     glUniform2f(mResLoc, (float)mWidth, (float)mHeight);
     glUniform1f(mTimeLoc, currentTime);
-    
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, mTextures[mPingPongIdx]);
     glUniform1i(mPrevLoc, 0);
-
     glBindBuffer(GL_ARRAY_BUFFER, mQuadVBO);
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
-    // 2. Composite to Screen
+    // Pass 2: Blit
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glViewport(0, 0, mWidth, mHeight);
-    // Reuse program or use a simple blit shader
+    glUseProgram(mBlitProgram);
+    glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, mTextures[nextIdx]);
+    glUniform1i(mBlitTexLoc, 0);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
     eglSwapBuffers(mDisplay, mSurface);
@@ -186,14 +177,10 @@ void Engine::Render() {
 
 void Engine::UpdateControls(float zoom, float warp, float dampening) {
     std::lock_guard<std::mutex> lock(mControlMutex);
-    mUserControls[0] = zoom;
-    mUserControls[1] = warp;
-    mUserControls[2] = dampening;
+    mUserControls[0] = zoom; mUserControls[1] = warp; mUserControls[2] = dampening;
 }
 
-void Engine::PushAudioData(const float* data, int length) {
-    mAudio.PushData(data, length);
-}
+void Engine::PushAudioData(const float* data, int length) { mAudio.PushData(data, length); }
 
 void Engine::TerminateGLES() {
     if (mDisplay != EGL_NO_DISPLAY) {
@@ -211,9 +198,8 @@ GLuint Engine::CompileShader(GLenum type, const char* source) {
     GLint compiled;
     glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
     if (!compiled) {
-        char infoLog[512];
-        glGetShaderInfoLog(shader, 512, nullptr, infoLog);
-        __android_log_print(ANDROID_LOG_ERROR, TAG, "Shader Error: %s", infoLog);
+        char log[512]; glGetShaderInfoLog(shader, 512, nullptr, log);
+        __android_log_print(ANDROID_LOG_ERROR, TAG, "Shader Error: %s", log);
         return 0;
     }
     return shader;
@@ -221,8 +207,7 @@ GLuint Engine::CompileShader(GLenum type, const char* source) {
 
 GLuint Engine::LinkProgram(GLuint vert, GLuint frag) {
     GLuint prog = glCreateProgram();
-    glAttachShader(prog, vert);
-    glAttachShader(prog, frag);
+    glAttachShader(prog, vert); glAttachShader(prog, frag);
     glLinkProgram(prog);
     return prog;
 }
@@ -234,17 +219,12 @@ extern "C" {
         Engine::GetInstance()->SetSurface(window);
         Engine::GetInstance()->InitGLES();
     }
-
     JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_renderFrame(JNIEnv* env, jobject obj) {
-        (void)env; (void)obj;
-        Engine::GetInstance()->Render();
+        (void)env; (void)obj; Engine::GetInstance()->Render();
     }
-
     JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_updateControls(JNIEnv* env, jobject obj, jfloat zoom, jfloat warp, jfloat dampening) {
-        (void)env; (void)obj;
-        Engine::GetInstance()->UpdateControls(zoom, warp, dampening);
+        (void)env; (void)obj; Engine::GetInstance()->UpdateControls(zoom, warp, dampening);
     }
-
     JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_pushAudioData(JNIEnv* env, jobject obj, jfloatArray data) {
         (void)obj;
         jfloat* buffer = env->GetFloatArrayElements(data, nullptr);

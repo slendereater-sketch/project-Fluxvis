@@ -44,10 +44,11 @@ private:
     GLuint mUBO;
     GLuint mQuadVBO;
     GLuint mProgram;
+    GLuint mBlitProgram;
 
     // Uniform locations
     GLint mResLoc, mTimeLoc, mPrevLoc;
-
+    GLint mBlitTexLoc;
     int mPingPongIdx = 0;
     int mWidth, mHeight;
     float mStartTime;
