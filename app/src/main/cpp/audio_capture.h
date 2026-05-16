@@ -28,6 +28,7 @@ public:
         int32_t numFrames) override;
 
     AudioFeatures GetLatestFeatures() const;
+    void PushData(const float* samples, int numFrames);
 
 private:
     void ProcessFFT(const float* samples, int numFrames);

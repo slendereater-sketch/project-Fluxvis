@@ -119,6 +119,10 @@ void Engine::UpdateControls(float zoom, float warp, float dampening) {
     mUserControls[2] = dampening;
 }
 
+void Engine::PushAudioData(const float* data, int length) {
+    mAudio.PushData(data, length);
+}
+
 // JNI Bindings
 extern "C" {
     JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_init(JNIEnv* env, jobject obj, jobject surface) {
@@ -133,5 +137,12 @@ extern "C" {
 
     JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_updateControls(JNIEnv* env, jobject obj, jfloat zoom, jfloat warp, jfloat dampening) {
         Engine::GetInstance()->UpdateControls(zoom, warp, dampening);
+    }
+
+    JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_pushAudioData(JNIEnv* env, jobject obj, jfloatArray data) {
+        jfloat* buffer = env->GetFloatArrayElements(data, nullptr);
+        jsize length = env->GetArrayLength(data);
+        Engine::GetInstance()->PushAudioData(buffer, length);
+        env->ReleaseFloatArrayElements(data, buffer, JNI_ABORT);
     }
 }

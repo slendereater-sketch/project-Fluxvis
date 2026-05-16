@@ -10,4 +10,5 @@ object NativeInterface {
     external fun init(surface: Surface)
     external fun renderFrame()
     external fun updateControls(zoom: Float, warp: Float, dampening: Float)
+    external fun pushAudioData(data: FloatArray)
 }

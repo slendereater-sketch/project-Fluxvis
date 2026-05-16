@@ -121,6 +121,10 @@ AudioFeatures AudioCapture::GetLatestFeatures() const {
     return mLatestFeatures.load();
 }
 
+void AudioCapture::PushData(const float* samples, int numFrames) {
+    ProcessFFT(samples, numFrames);
+}
+
 void AudioCapture::DetectBeat(float energy) {
     // Basic energy derivative analysis handled in ProcessFFT for simplicity
 }

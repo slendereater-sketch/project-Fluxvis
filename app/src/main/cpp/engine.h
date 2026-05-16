@@ -17,6 +17,7 @@ public:
     
     void Render();
     void UpdateControls(float zoom, float warp, float dampening);
+    void PushAudioData(const float* data, int length);
 
 private:
     Engine();
