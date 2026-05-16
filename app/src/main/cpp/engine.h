@@ -4,7 +4,6 @@
 #include <EGL/egl.h>
 #include <android/native_window.h>
 #include "audio_capture.h"
-// #include "tpu_inference.h"
 #include <mutex>
 
 class Engine {
@@ -48,11 +47,11 @@ private:
     // Uniform locations
     GLint mResLoc, mTimeLoc, mPrevLoc;
     GLint mBlitTexLoc;
+    
     int mPingPongIdx = 0;
     int mWidth, mHeight;
     float mStartTime;
 
     float mUserControls[3] = {1.0f, 0.5f, 0.1f};
-    float mWeights[100] = {0.0f}; // Placeholder weights
     std::mutex mControlMutex;
 };

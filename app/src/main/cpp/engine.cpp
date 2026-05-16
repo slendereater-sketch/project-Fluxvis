@@ -166,6 +166,15 @@ void Engine::Render() {
     mPingPongIdx = nextIdx;
 }
 
+void Engine::UpdateControls(float zoom, float warp, float dampening) {
+    std::lock_guard<std::mutex> lock(mControlMutex);
+    mUserControls[0] = zoom; mUserControls[1] = warp; mUserControls[2] = dampening;
+}
+
+void Engine::PushAudioData(const float* data, int length) {
+    mAudio.PushData(data, length);
+}
+
 void Engine::TerminateGLES() {
     if (mDisplay != EGL_NO_DISPLAY) {
         eglMakeCurrent(mDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
@@ -187,6 +196,8 @@ GLuint Engine::LinkProgram(GLuint vert, GLuint frag) {
     return prog;
 }
 
+void Engine::SetupUBO() {}
+
 extern "C" {
     JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_init(JNIEnv* env, jobject obj, jobject surface) {
         ANativeWindow* window = ANativeWindow_fromSurface(env, surface);
@@ -197,7 +208,7 @@ extern "C" {
         Engine::GetInstance()->Render();
     }
     JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_updateControls(JNIEnv* env, jobject obj, jfloat zoom, jfloat warp, jfloat dampening) {
-        // ...
+        Engine::GetInstance()->UpdateControls(zoom, warp, dampening);
     }
     JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_pushAudioData(JNIEnv* env, jobject obj, jfloatArray data) {
         jfloat* buffer = env->GetFloatArrayElements(data, nullptr);
