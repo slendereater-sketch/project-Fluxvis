@@ -21,7 +21,7 @@ bool AudioCapture::Start() {
            ->setSharingMode(oboe::SharingMode::Exclusive)
            ->setFormat(oboe::AudioFormat::Float)
            ->setChannelCount(oboe::ChannelCount::Mono)
-           ->setCallback(this);
+           ->setDataCallback(this); // Use setDataCallback specifically
 
     oboe::Result result = builder.openStream(&mStream);
     if (result != oboe::Result::OK) {
@@ -50,7 +50,7 @@ oboe::DataCallbackResult AudioCapture::onAudioReady(
     oboe::AudioStream *audioStream,
     void *audioData,
     int32_t numFrames) {
-    
+    (void)audioStream;
     float *samples = static_cast<float *>(audioData);
     ProcessFFT(samples, numFrames);
     
@@ -111,7 +111,8 @@ void AudioCapture::Radix2FFT(std::vector<std::complex<float>>& data) {
     Radix2FFT(odd);
 
     for (int k = 0; k < n / 2; ++k) {
-        std::complex<float> t = std::polar(1.0f, -2.0f * M_PI * k / n) * odd[k];
+        // Fix polar by being explicit with float
+        std::complex<float> t = std::polar(1.0f, static_cast<float>(-2.0 * M_PI * k / n)) * odd[k];
         data[k] = even[k] + t;
         data[k + n / 2] = even[k] - t;
     }
@@ -126,5 +127,6 @@ void AudioCapture::PushData(const float* samples, int numFrames) {
 }
 
 void AudioCapture::DetectBeat(float energy) {
+    (void)energy;
     // Basic energy derivative analysis handled in ProcessFFT for simplicity
 }

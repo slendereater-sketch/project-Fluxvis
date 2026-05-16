@@ -123,23 +123,31 @@ void Engine::PushAudioData(const float* data, int length) {
     mAudio.PushData(data, length);
 }
 
+void Engine::TerminateGLES() {
+    // Basic cleanup
+}
+
 // JNI Bindings
 extern "C" {
     JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_init(JNIEnv* env, jobject obj, jobject surface) {
+        (void)obj;
         ANativeWindow* window = ANativeWindow_fromSurface(env, surface);
         Engine::GetInstance()->SetSurface(window);
         Engine::GetInstance()->InitGLES();
     }
 
     JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_renderFrame(JNIEnv* env, jobject obj) {
+        (void)env; (void)obj;
         Engine::GetInstance()->Render();
     }
 
     JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_updateControls(JNIEnv* env, jobject obj, jfloat zoom, jfloat warp, jfloat dampening) {
+        (void)env; (void)obj;
         Engine::GetInstance()->UpdateControls(zoom, warp, dampening);
     }
 
     JNIEXPORT void JNICALL Java_com_visualizer_engine_NativeInterface_pushAudioData(JNIEnv* env, jobject obj, jfloatArray data) {
+        (void)obj;
         jfloat* buffer = env->GetFloatArrayElements(data, nullptr);
         jsize length = env->GetArrayLength(data);
         Engine::GetInstance()->PushAudioData(buffer, length);
