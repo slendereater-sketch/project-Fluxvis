@@ -3,6 +3,7 @@
 #include <android/native_window_jni.h>
 #include <android/log.h>
 #include <time.h>
+#include <algorithm>
 
 #define TAG "Engine"
 
@@ -67,7 +68,7 @@ void Engine::InitGLES() {
             return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
         }
 
-        // --- PRESET 0: BLUE NEON FRACTAL (REFINED) ---
+        // --- PRESET 0: BLUE NEON FRACTAL ---
         vec3 blueFractal(vec2 uv, float time, float bass, float mid, float high, vec2 touch) {
             vec2 p = (uv - 0.5) * 2.0;
             p.x *= u_resolution.x / u_resolution.y;
@@ -91,11 +92,9 @@ void Engine::InitGLES() {
             vec3 col = vec3(0.0);
             float d = length(p);
             
-            // Background stars
             float stars = fract(sin(dot(uv, vec2(12.9898, 78.233))) * 43758.5453);
             if(stars > 0.995) col += vec3(0.5);
 
-            // Orbiting rings
             for(int i=1; i<5; i++) {
                 float r = 0.2 * float(i) + sin(time * 0.5 + float(i)) * 0.05;
                 float ring = abs(d - r);
@@ -103,10 +102,8 @@ void Engine::InitGLES() {
                 col += hsv2rgb(vec3(float(i)*0.2, 0.6, 1.0)) * (thick / (ring + thick));
             }
             
-            // Central sun
             float sun = smoothstep(0.1 + bass * 0.1, 0.0, d);
             col += vec3(1.0, 0.6, 0.2) * sun * 2.0;
-            
             return col;
         }
 
@@ -114,19 +111,14 @@ void Engine::InitGLES() {
         vec3 microbial(vec2 uv, float time, float bass, float mid, float high, vec2 touch) {
             vec2 p = uv * (3.0 + touch.x * 4.0);
             p += vec2(sin(time*0.2), cos(time*0.3)) * touch.y;
-            
             float v = 0.0;
             v += sin(p.x + time);
             v += sin((p.y + time) / 2.0);
             v += sin(sqrt(p.x*p.x + p.y*p.y + 1.0) + time);
-            
             vec3 col = hsv2rgb(vec3(v * 0.1 + 0.3, 0.8, 0.6));
             col *= 0.5 + high * 1.5;
-            
-            // Add some "cells"
             float cells = sin(p.x*10.0) * sin(p.y*10.0);
             if(cells > 0.8 - bass * 0.2) col *= 1.5;
-            
             return col;
         }
 
@@ -134,11 +126,9 @@ void Engine::InitGLES() {
         vec3 fractalZoom(vec2 uv, float time, float bass, float mid, float high, vec2 touch) {
             vec2 p = (uv - 0.5) * 2.0;
             p.x *= u_resolution.x / u_resolution.y;
-            
             float zoom = exp(mod(time * 0.5, 5.0));
             p /= zoom;
             p += touch * 2.0 - 1.0;
-            
             vec2 z = p;
             vec2 c = vec2(-0.745, 0.113) + (mid * 0.01);
             float iter = 0.0;
@@ -147,7 +137,6 @@ void Engine::InitGLES() {
                 if(dot(z,z) > 4.0) break;
                 iter++;
             }
-            
             if(iter == 64.0) return vec3(0.0);
             return hsv2rgb(vec3(iter/64.0 + time*0.1, 0.8, 1.0)) * (1.0 + bass * 2.0);
         }
@@ -159,10 +148,9 @@ void Engine::InitGLES() {
             else if(u_preset == 2) col = microbial(v_uv, u_time, u_bass, u_mid, u_high, u_touch);
             else col = fractalZoom(v_uv, u_time, u_bass, u_mid, u_high, u_touch);
             
-            // --- AUTO-TUNED BRIGHTNESS (Global Exposure) ---
-            col = col / (1.0 + col); // Reinhard tonemapping
-            col = pow(col, vec3(0.8)); // Gamma correction for richness
-            
+            // Auto-tuned brightness
+            col = col / (1.0 + col);
+            col = pow(col, vec3(0.85)); 
             fragColor = vec4(col, 1.0);
         })";
 
@@ -186,17 +174,26 @@ void Engine::SetupQuad() {
 void Engine::Render() {
     if (!mProgram) return;
 
-    auto audio = mAudio.GetLatestFeatures();
+    // Temporal Smoothing (EMA) for butter-smooth audio reactivity
+    auto rawAudio = mAudio.GetLatestFeatures();
+    const float alpha = 0.15f; // Smoothing factor
+    mSmoothBass = mSmoothBass * (1.0f - alpha) + rawAudio.bass * alpha;
+    mSmoothMid = mSmoothMid * (1.0f - alpha) + rawAudio.mid * alpha;
+    mSmoothHigh = mSmoothHigh * (1.0f - alpha) + rawAudio.treble * alpha;
+
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     float currentTime = (float)ts.tv_sec + (float)ts.tv_nsec / 1e9f - mStartTime;
 
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+
     glUseProgram(mProgram);
     glUniform2f(mResLoc, (float)mWidth, (float)mHeight);
     glUniform1f(mTimeLoc, currentTime);
-    glUniform1f(glGetUniformLocation(mProgram, "u_bass"), audio.bass);
-    glUniform1f(glGetUniformLocation(mProgram, "u_mid"), audio.mid);
-    glUniform1f(glGetUniformLocation(mProgram, "u_high"), audio.treble);
+    glUniform1f(glGetUniformLocation(mProgram, "u_bass"), mSmoothBass);
+    glUniform1f(glGetUniformLocation(mProgram, "u_mid"), mSmoothMid);
+    glUniform1f(glGetUniformLocation(mProgram, "u_high"), mSmoothHigh);
     glUniform2f(glGetUniformLocation(mProgram, "u_touch"), mTouchX, mTouchY);
     glUniform1i(glGetUniformLocation(mProgram, "u_preset"), mPreset);
     
@@ -210,6 +207,7 @@ void Engine::NextPreset() {
 }
 
 void Engine::UpdateTouch(float x, float y) {
+    // Smoothed touch coordinates could also be added, but direct usually feels better
     mTouchX = x;
     mTouchY = y;
 }

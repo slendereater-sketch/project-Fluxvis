@@ -48,6 +48,11 @@ public:
     float mTouchX = 0.5f;
     float mTouchY = 0.5f;
 
+    // Smoothed audio features
+    float mSmoothBass = 0.0f;
+    float mSmoothMid = 0.0f;
+    float mSmoothHigh = 0.0f;
+
     float mUserControls[3] = {1.0f, 0.5f, 0.1f};
     std::mutex mControlMutex;
     };
