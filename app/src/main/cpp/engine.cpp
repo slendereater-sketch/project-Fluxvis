@@ -122,31 +122,11 @@ void Engine::InitGLES() {
             return col;
         }
 
-        // --- PRESET 3: INFINITE FRACTAL ZOOM ---
-        vec3 fractalZoom(vec2 uv, float time, float bass, float mid, float high, vec2 touch) {
-            vec2 p = (uv - 0.5) * 2.0;
-            p.x *= u_resolution.x / u_resolution.y;
-            float zoom = exp(mod(time * 0.5, 5.0));
-            p /= zoom;
-            p += touch * 2.0 - 1.0;
-            vec2 z = p;
-            vec2 c = vec2(-0.745, 0.113) + (mid * 0.01);
-            float iter = 0.0;
-            for(int i=0; i<64; i++) {
-                z = vec2(z.x*z.x - z.y*z.y, 2.0*z.x*z.y) + c;
-                if(dot(z,z) > 4.0) break;
-                iter++;
-            }
-            if(iter == 64.0) return vec3(0.0);
-            return hsv2rgb(vec3(iter/64.0 + time*0.1, 0.8, 1.0)) * (1.0 + bass * 2.0);
-        }
-
         void main() {
             vec3 col = vec3(0.0);
             if(u_preset == 0) col = blueFractal(v_uv, u_time, u_bass, u_mid, u_high, u_touch);
             else if(u_preset == 1) col = spaceOrbit(v_uv, u_time, u_bass, u_mid, u_high, u_touch);
-            else if(u_preset == 2) col = microbial(v_uv, u_time, u_bass, u_mid, u_high, u_touch);
-            else col = fractalZoom(v_uv, u_time, u_bass, u_mid, u_high, u_touch);
+            else col = microbial(v_uv, u_time, u_bass, u_mid, u_high, u_touch);
             
             // Auto-tuned brightness
             col = col / (1.0 + col);
@@ -174,9 +154,8 @@ void Engine::SetupQuad() {
 void Engine::Render() {
     if (!mProgram) return;
 
-    // Temporal Smoothing (EMA) for butter-smooth audio reactivity
     auto rawAudio = mAudio.GetLatestFeatures();
-    const float alpha = 0.15f; // Smoothing factor
+    const float alpha = 0.15f; 
     mSmoothBass = mSmoothBass * (1.0f - alpha) + rawAudio.bass * alpha;
     mSmoothMid = mSmoothMid * (1.0f - alpha) + rawAudio.mid * alpha;
     mSmoothHigh = mSmoothHigh * (1.0f - alpha) + rawAudio.treble * alpha;
@@ -203,11 +182,10 @@ void Engine::Render() {
 }
 
 void Engine::NextPreset() {
-    mPreset = (mPreset + 1) % 4;
+    mPreset = (mPreset + 1) % 3;
 }
 
 void Engine::UpdateTouch(float x, float y) {
-    // Smoothed touch coordinates could also be added, but direct usually feels better
     mTouchX = x;
     mTouchY = y;
 }
