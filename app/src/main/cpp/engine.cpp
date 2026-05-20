@@ -76,25 +76,34 @@ void Engine::InitGLES() {
         vec3 mandala(vec2 uv, float time, float bass, float mid, float high, vec2 touch) {
             vec2 p = (uv - 0.5) * 2.0;
             p.x *= u_resolution.x / u_resolution.y;
-            p *= 0.8 + touch.x * 2.0;
+            
+            // Zoom out: Increased base multiplier
+            p *= 2.0 + touch.x * 4.0;
+            
+            // Fluidity: Domain warp the coordinates with sine waves
+            p += vec2(sin(p.y * 0.8 + time * 0.5), cos(p.x * 0.8 + time * 0.5)) * (0.2 + bass * 0.3);
             
             float r = length(p);
             float a = atan(p.y, p.x);
             
-            // 8-fold symmetry
-            float sides = 8.0;
+            // 12-fold symmetry for more fluid detail
+            float sides = 12.0;
             a = mod(a, 2.0 * 3.14159 / sides) - 3.14159 / sides;
             p = vec2(cos(a), sin(a)) * r;
             
             float d = 1e10;
-            for(int i=0; i<4; i++) {
-                p = abs(p) - (0.3 + bass * 0.2);
-                p *= rot(time * 0.2 + float(i));
-                d = min(d, abs(p.x) + abs(p.y));
+            for(int i=0; i<5; i++) {
+                // Liquid fractal transformation using dot(p,p)
+                float l = dot(p, p);
+                p = abs(p) / (l + 0.15) - (0.45 + mid * 0.1);
+                p *= rot(time * 0.15 + float(i) * 0.4 + high * 0.3);
+                d = min(d, length(p));
             }
             
-            vec3 col = hsv2rgb(vec3(time * 0.1 + r * 0.2, 0.7, 1.0));
-            return col * (0.02 / (d + 0.01)) * (1.0 + mid);
+            vec3 col = hsv2rgb(vec3(time * 0.08 + r * 0.15, 0.65, 1.0));
+            // Smoother glow with bass influence
+            float glow = 0.05 / (d + 0.03 + bass * 0.05);
+            return col * glow * (1.1 + bass * 2.5);
         }
 
         // PRESET 1: QUANTUM FLUX (Fluid Domain Warping)
