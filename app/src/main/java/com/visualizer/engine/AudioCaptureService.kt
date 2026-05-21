@@ -99,7 +99,7 @@ class AudioCaptureService : Service() {
                 while (isCapturing) {
                     val read = audioRecord?.read(buffer, 0, buffer.size, AudioRecord.READ_BLOCKING) ?: 0
                     if (read > 0) {
-                        NativeInterface.pushAudioData(buffer.sliceArray(0 until read))
+                        NativeInterface.nPushAudioData(buffer.sliceArray(0 until read))
                     }
                 }
             }.start()

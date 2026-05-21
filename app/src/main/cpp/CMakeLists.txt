@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22.1)
 
-project("ndk_visualizer")
+project("vulkan_visualizer")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -8,8 +8,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Find NDK libraries
 find_library(log-lib log)
 find_library(android-lib android)
-find_library(gles3-lib GLESv3)
-find_library(egl-lib EGL)
+find_library(vulkan-lib vulkan)
+find_library(media-lib mediandk)
 
 # Oboe (FetchContent)
 include(FetchContent)
@@ -24,10 +24,11 @@ FetchContent_MakeAvailable(oboe)
 add_library(${CMAKE_PROJECT_NAME} SHARED
     audio_capture.cpp
     engine.cpp
+    video_decoder.cpp
+    vulkan_renderer.cpp
 )
 
 # Apply optimizations and warnings ONLY to our target
-# This prevents -Werror from breaking the third-party Oboe build
 target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE
     -O3
     -march=armv8-a+crypto
@@ -36,7 +37,6 @@ target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE
     -frtti
     -Wall
     -Wextra
-    # Explicitly NOT using -Werror globally anymore to ensure build success
 )
 
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
@@ -46,7 +46,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_link_libraries(${CMAKE_PROJECT_NAME}
     ${log-lib}
     ${android-lib}
-    ${gles3-lib}
-    ${egl-lib}
+    ${vulkan-lib}
+    ${media-lib}
     oboe
 )

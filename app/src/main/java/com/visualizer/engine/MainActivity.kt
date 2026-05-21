@@ -5,20 +5,18 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
-import android.opengl.GLSurfaceView
 import android.os.Bundle
-import android.view.GestureDetector
-import android.view.MotionEvent
+import android.view.SurfaceHolder
+import android.view.SurfaceView
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
-import javax.microedition.khronos.egl.EGLConfig
-import javax.microedition.khronos.opengles.GL10
+import kotlin.concurrent.thread
 
 class MainActivity : ComponentActivity() {
 
-    private lateinit var gestureDetector: GestureDetector
+    private var isRendering = false
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -42,41 +40,40 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        // Setup gesture detector for preset switching
-        gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
-            override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-                NativeInterface.nextPreset()
-                return true
-            }
-        })
+        val surfaceView = SurfaceView(this).apply {
+            holder.addCallback(object : SurfaceHolder.Callback {
+                override fun surfaceCreated(holder: SurfaceHolder) {
+                    NativeInterface.nSetSurface(holder.surface)
+                    startRenderLoop()
+                }
 
-        val glView = GLSurfaceView(this).apply {
-            setEGLContextClientVersion(3)
-            setRenderer(object : GLSurfaceView.Renderer {
-                override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
-                    NativeInterface.init(null)
+                override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+                    NativeInterface.nOnResize(width, height)
                 }
-                override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
-                    NativeInterface.onResize(width, height)
-                }
-                override fun onDrawFrame(gl: GL10?) {
-                    NativeInterface.renderFrame()
+
+                override fun surfaceDestroyed(holder: SurfaceHolder) {
+                    stopRenderLoop()
+                    NativeInterface.nSetSurface(null)
                 }
             })
-            renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
-            
-            // Handle touch events for warping and tap to switch
-            setOnTouchListener { v, event ->
-                gestureDetector.onTouchEvent(event)
-                val normX = event.x / v.width
-                val normY = event.y / v.height
-                NativeInterface.updateTouch(normX, normY)
-                true
-            }
         }
 
-        setContentView(glView)
+        setContentView(surfaceView)
         checkPermissions()
+    }
+
+    private fun startRenderLoop() {
+        isRendering = true
+        thread(start = true) {
+            while (isRendering) {
+                NativeInterface.nRender()
+                // Limit to ~60fps if needed, but Vulkan swapchain usually handles vsync
+            }
+        }
+    }
+
+    private fun stopRenderLoop() {
+        isRendering = false
     }
 
     private fun checkPermissions() {

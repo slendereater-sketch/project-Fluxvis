@@ -4,14 +4,11 @@ import android.view.Surface
 
 object NativeInterface {
     init {
-        System.loadLibrary("ndk_visualizer")
+        System.loadLibrary("vulkan_visualizer")
     }
 
-    external fun init(surface: Surface?)
-    external fun onResize(width: Int, height: Int)
-    external fun renderFrame()
-    external fun updateControls(zoom: Float, warp: Float, dampening: Float)
-    external fun pushAudioData(data: FloatArray)
-    external fun updateTouch(x: Float, y: Float)
-    external fun nextPreset()
+    external fun nSetSurface(surface: Surface?)
+    external fun nOnResize(width: Int, height: Int)
+    external fun nRender()
+    external fun nPushAudioData(data: FloatArray)
 }
