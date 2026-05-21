@@ -1,4 +1,5 @@
 #include "vulkan_renderer.h"
+#include <vulkan/vulkan_android.h>
 #include <android/log.h>
 #include <stdexcept>
 #include <vector>
